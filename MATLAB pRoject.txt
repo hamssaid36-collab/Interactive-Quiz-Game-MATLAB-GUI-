@@ -1,0 +1,203 @@
+function interactive_quiz_gui()
+    clc;
+    close all;
+
+    % Try loading sound files
+    try
+        [y_correct, Fs1] = audioread('correct.wav');
+        [y_wrong, Fs2] = audioread('wrong.wav');
+        hasSound = true;
+    catch
+        warning('Sound files not found. Sounds disabled.');
+        hasSound = false;
+    end
+
+    % Quiz data: questions with hints
+    quizData = {
+        'Easy', {
+            {'What is the goal of engineering?', {'To build bridges','To entertain','To change the world for benefit','To code only'}, 3, 'Engineering aims to improve the world with innovative solutions.'};
+            {'SWOT stands for Strengths, Weaknesses, Opportunities and...?', {'Teams','Thoughts','Threats','Tools'}, 3, 'Threats refer to external challenges to your goal.'};
+            {'What makes a task a "project"?', {'Long duration','Specific goal, temporary and unique','Done individually','Only for engineers'}, 2, 'Projects are unique, goal-oriented, and time-bound.'};
+            {'What is the first step of the Engineering Design Process?', {'Build','Brainstorm','Identify the problem','Draw a schematic'}, 3, 'You must define the problem before solving it.'};
+            {'What is a stakeholder?', {'A chef','A competitor','A person affected by the project','An investor only'}, 3, 'Stakeholders are anyone impacted by the project.'};
+        };
+        'Medium', {
+            {'Which is a valid Pain Reliever in Value Proposition Canvas?', {'Marketing','Effort-reducing feature','Social media ad','Free sample'}, 2, 'Pain relievers ease the user''s problem directly.'};
+            {'What defines a Value Proposition?', {'Expensive product','Benefit solving customer problem','Advertisement','Store layout'}, 2, 'It is about solving the customer''s actual need.'};
+            {'In stakeholder matrix, who to "Keep Informed"?', {'High power, high interest','Low power, high interest','Low power, low interest','High power, low interest'}, 2, 'They care, but don''t have influence.'};
+            {'What does "Customer Job" refer to?', {'Customers profession','Tasks they want to complete','Tasks to design product','User reviews'}, 2, 'It is about what the customer is trying to get done.'};
+            {'Which is NOT part of Engineering Design Process?', {'Define the problem','Bribe stakeholders','Test and evaluate','Communicate solution'}, 2, 'Bribing is unethical and not part of the process.'};
+        };
+        'Hard',  {
+            {'What should a good Design Brief include?', {'A motivational quote','Sketch only','What, who, why, problem','Teams favorite ideas'}, 3, 'It clearly states the problem, goals, and constraints.'};
+            {'Why are constraints important?', {'They are optional','They help focus and guide realistic solutions','They inspire chaos','They delay progress'}, 2, 'Constraints keep solutions grounded and practical.'};
+            {'In Value Map, "Gains" are...', {'Negative experiences','Side features','Expected customer benefits','Financial profits only'}, 3, 'Gains are the improvements your customer expects.'};
+            {'Why is iteration critical?', {'Delays deadline','Ensures personal satisfaction','Improves design based on feedback','Confuses competition'}, 3, 'Iteration helps refine designs through feedback.'};
+            {'Why did Starbucks fail in Australia?', {'Too many locations','Weak machines','Cultural misfit with customers','Cheap prices'}, 3, 'They did not align with local customer culture.'}
+        }
+    };
+
+    % Initialization
+    currentLevel = 1;
+    currentQuestion = 1;
+    score = 0;
+    totalQuestions = 15;
+    correctPerLevel = zeros(1,3);
+    timePerQuestion = 15;
+    remainingTime = timePerQuestion;
+
+    % GUI Theme
+    bgColor = [1 1 0.85];
+    panelColor = [1 1 0.95];
+    btnColor = [0.8 0.1 0.1];
+    textColor = [0.4 0 0];
+    fontName = 'Segoe UI';
+
+    f = figure('Name','ECE Quiz Game','Position',[300 300 700 550],'NumberTitle','off','Color', bgColor,'MenuBar','none','Resize','off');
+    mainPanel = uipanel('Parent',f,'Units','normalized','Position',[0.05 0.18 0.9 0.75],'BackgroundColor',panelColor);
+
+    questionText = uicontrol('Parent',mainPanel, 'Style','text','Units','normalized','Position',[0.03 0.75 0.94 0.22],'FontSize',14,'FontWeight','bold','FontName',fontName,'ForegroundColor', textColor,'HorizontalAlignment','left','BackgroundColor', panelColor,'Max', 2);
+
+    btns = gobjects(1,4);
+    for i = 1:4
+        btns(i) = uicontrol('Parent',mainPanel,'Style','pushbutton','Units','normalized','Position',[0.03 0.75 - i*(0.12 + 0.02) 0.94 0.12],'FontSize',14,'FontWeight','bold','FontName',fontName,'BackgroundColor', btnColor,'ForegroundColor','white','Callback',@(src,~) checkAnswer(i));
+    end
+
+    hint1Btn = uicontrol('Parent',mainPanel,'Style','pushbutton','Units','normalized','Position',[0.03 0.05 0.45 0.08],'String','Hint 1: Show Clue','FontSize',12,'Callback',@(src,~) showClue());
+    hint2Btn = uicontrol('Parent',mainPanel,'Style','pushbutton','Units','normalized','Position',[0.52 0.05 0.45 0.08],'String','Hint 2: Remove 2 Options','FontSize',12,'Callback',@(src,~) eliminateWrongOptions());
+
+    statusPanel = uipanel('Parent',f,'Units','normalized','Position',[0 0 1 0.14],'BackgroundColor',panelColor);
+    scoreText = uicontrol('Parent',statusPanel,'Style','text','Units','normalized','Position',[0.03 0.1 0.25 0.8],'String','Score: 0','FontSize',14,'FontWeight','bold','FontName',fontName,'ForegroundColor', textColor,'BackgroundColor', panelColor);
+    levelText = uicontrol('Parent',statusPanel,'Style','text','Units','normalized','Position',[0.35 0.1 0.3 0.8],'String','Level: Easy','FontSize',14,'FontWeight','bold','FontName',fontName,'ForegroundColor', textColor,'BackgroundColor', panelColor);
+    timerText = uicontrol('Parent',statusPanel,'Style','text','Units','normalized','Position',[0.7 0.1 0.27 0.8],'String',sprintf('Time left: %d', remainingTime),'FontSize',14,'FontWeight','bold','FontName',fontName,'ForegroundColor', textColor,'BackgroundColor', panelColor);
+
+    t = timer('ExecutionMode','fixedRate','Period',1,'TimerFcn',@updateTimer);
+    showQuestion();
+
+    function showQuestion()
+        stop(t);
+        remainingTime = timePerQuestion;
+        updateTimerDisplay();
+
+        delete(findall(mainPanel, 'Style', 'pushbutton', 'String', 'Next'));  % remove any old Next buttons
+
+        levelName = quizData{currentLevel,1};
+        questions = quizData{currentLevel,2};
+
+        if currentQuestion > size(questions,1)
+            currentLevel = currentLevel + 1;
+            currentQuestion = 1;
+            if currentLevel > size(quizData,1)
+                delete(t);
+                msgbox(sprintf('Game Over!\nYour final score is %d/%d.',score,totalQuestions),'Quiz Complete','modal');
+                plotResults();
+                close(f);
+                return;
+            end
+            levelName = quizData{currentLevel,1};
+            levelText.String = ['Level: ' levelName];
+            questions = quizData{currentLevel,2};
+        end
+
+        q = questions{currentQuestion};
+        questionText.String = sprintf('Q%d: %s', currentQuestion, q{1});
+        for j = 1:4
+            btns(j).String = sprintf('%d) %s', j, q{2}{j});
+            btns(j).BackgroundColor = btnColor;
+            btns(j).Enable = 'on';
+        end
+
+        levelText.String = ['Level: ' levelName];
+        scoreText.String = sprintf('Score: %d / %d', score, totalQuestions);
+        hint1Btn.Enable = 'on';
+        hint2Btn.Enable = 'on';
+        start(t);
+    end
+
+    function checkAnswer(choice)
+        stop(t);
+        q = quizData{currentLevel,2}{currentQuestion};
+        for b = btns
+            b.Enable = 'off';
+        end
+
+        if choice == 0
+            if hasSound
+                sound(y_wrong, Fs2);
+            end
+            msgbox('Time''s up!', 'Timeout');
+            uicontrol('Parent',mainPanel,'Style','pushbutton','Units','normalized','Position',[0.35 0.4 0.3 0.1],'String','Next','FontSize',14,'FontWeight','bold','Callback',@(src,~) nextQuestion());
+            return;
+        elseif choice == q{3}
+            score = score + 1;
+            correctPerLevel(currentLevel) = correctPerLevel(currentLevel) + 1;
+            if hasSound
+                sound(y_correct, Fs1);
+            end
+            msgbox('Correct!','Result');
+        else
+            if hasSound
+                sound(y_wrong, Fs2);
+            end
+            msgbox(sprintf('Wrong! Correct answer was: %s', q{2}{q{3}}),'Result');
+        end
+
+        scoreText.String = sprintf('Score: %d / %d', score, totalQuestions);
+        currentQuestion = currentQuestion + 1;
+        pause(0.5);
+        showQuestion();
+    end
+
+    function nextQuestion()
+        currentQuestion = currentQuestion + 1;
+        showQuestion();
+    end
+
+    function updateTimer(~,~)
+        remainingTime = remainingTime - 1;
+        updateTimerDisplay();
+        if remainingTime <= 0
+            checkAnswer(0);
+        end
+    end
+
+    function updateTimerDisplay()
+        timerText.String = sprintf('Time left: %d', remainingTime);
+    end
+
+    function plotResults()
+        figure('Name','Quiz Results','NumberTitle','off');
+        bar(correctPerLevel, 'FaceColor', [0.8 0.1 0.1]);
+        set(gca, 'XTickLabel', {'Easy','Medium','Hard'});
+        ylabel('Correct Answers');
+        title('Quiz Performance by Level');
+    end
+
+    function showClue()
+        q = quizData{currentLevel,2}{currentQuestion};
+        msgbox(q{4}, 'Hint 1');
+        hint1Btn.Enable = 'off';
+    end
+function eliminateWrongOptions()
+    q = quizData{currentLevel,2}{currentQuestion};
+    correct = q{3};
+    wrongIndices = setdiff(1:4, correct);
+
+    if numel(wrongIndices) < 2
+        warning('Not enough wrong options to disable.');
+        return;
+    end
+
+    % Use randperm instead of randsample
+    perm = randperm(numel(wrongIndices), 2);
+    toDisable = wrongIndices(perm);
+
+    for idx = toDisable
+        btns(idx).Enable = 'off';
+        btns(idx).BackgroundColor = [0.6 0.6 0.6];
+    end
+
+    hint2Btn.Enable = 'off';
+end
+
+end
